@@ -3,6 +3,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.options import Options
 
 from bs4 import BeautifulSoup
 
@@ -16,7 +17,20 @@ class CourseScraper:
         self.MIN_WAIT_TIME = 3
         self.DEBUG_MODE = True
 
-        self.driver = webdriver.Chrome()
+        self.base_download_dir = os.path.abspath("downloads")
+
+        chrome_options = Options()
+        chrome_options.add_experimental_option(
+            "prefs",
+            {
+                "download.default_directory": self.base_download_dir,
+                "download.prompt_for_download": False,
+                "download.directory_upgrade": True,
+                "safebrowsing.enabled": True
+            }
+        )
+
+        self.driver = webdriver.Chrome(options=chrome_options)
         self.cookies_file = "cookies.json"
 
     def log(self, msg, exception=None):
@@ -162,15 +176,26 @@ class CourseScraper:
         self.log(f"Found {len(urls)} lessons")
         return urls
     
-    def download_course(self, course_url):
+    def download_course(self, course_url, course_name):
+        course_dir = os.path.join(self.base_download_dir, course_name)
+        os.makedirs(course_dir, exist_ok=True)
+
+        print(course_dir)
+
+        # muda pasta de download do Chrome em tempo de execução
+        self.driver.execute_cdp_cmd(
+            "Page.setDownloadBehavior",
+            {
+                "behavior": "allow",
+                "downloadPath": course_dir
+            }
+        )
+
         class_urls = self.get_all_class_links(course_url)
 
         for index, url in enumerate(class_urls, start=1):
             self.log(f"Downloading lesson {index}/{len(class_urls)}")
-            if index == 1:
-                self.get_class_material(url, firstTime=True)
-            else:
-                self.get_class_material(url, firstTime=False)
+            self.get_class_material(url, firstTime=(index == 1))
             time.sleep(2)
 
 # ------------------- USAGE -------------------
@@ -178,5 +203,8 @@ class CourseScraper:
 scraper = CourseScraper()
 scraper.login("https://padrepauloricardo.org/entrar")
 #scraper.get_class_material('https://padrepauloricardo.org/aulas/o-que-e-ser-homem')
-scraper.download_course('https://padrepauloricardo.org/cursos/os-sete-sacramentos')
+scraper.download_course(
+    "https://padrepauloricardo.org/cursos/os-sete-sacramentos",
+    course_name="Os-Sete-Sacramentos"
+)
 time.sleep(5)
