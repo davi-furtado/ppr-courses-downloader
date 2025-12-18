@@ -90,9 +90,9 @@ class CourseScraper:
     def download_class_audio(self):
         try:
             WebDriverWait(self.driver, self.MAX_WAIT_TIME).until(
-                EC.presence_of_element_located((By.PARTIAL_LINK_TEXT, 'Áudio da aula (mp3)'))
+                EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'Áudio da aula')]"))
             )
-            audio = self.driver.find_element(By.PARTIAL_LINK_TEXT, 'Áudio da aula (mp3)')
+            audio = self.driver.find_element(By.XPATH, "//*[contains(text(), 'Áudio da aula')]")
             audio.click()
         except Exception as e:
             self.log('Couldnt find audio', e)
@@ -125,25 +125,26 @@ class CourseScraper:
         except Exception as e:
             self.log('Couldnt find Salvar button', e)
 
-    def get_class_material(self, class_url):
+    def get_class_material(self, class_url, firstTime=False):
         self.driver.get(class_url)
 
-        try:
-            review = WebDriverWait(self.driver, self.MIN_WAIT_TIME).until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, ".course-review__ask-later"))
-            )
-            review.click()
-        except:
-            pass
+        if not firstTime:
+            try:
+                review = WebDriverWait(self.driver, self.MIN_WAIT_TIME).until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, ".course-review__ask-later"))
+                )
+                review.click()
+            except:
+                pass
 
-        # TODO move to class listing
-        try:
-            enable_cookies = WebDriverWait(self.driver, self.MIN_WAIT_TIME).until(
-                EC.element_to_be_clickable((By.ID, "c-p-bn"))
-            )
-            enable_cookies.click()
-        except:
-            pass
+            # TODO move to class listing
+            try:
+                enable_cookies = WebDriverWait(self.driver, self.MIN_WAIT_TIME).until(
+                    EC.element_to_be_clickable((By.ID, "c-p-bn"))
+                )
+                enable_cookies.click()
+            except:
+                pass
 
         self.download_class_audio()
         # TODO self.download_class_summary()
@@ -166,7 +167,10 @@ class CourseScraper:
 
         for index, url in enumerate(class_urls, start=1):
             self.log(f"Downloading lesson {index}/{len(class_urls)}")
-            self.get_class_material(url)
+            if index == 1:
+                self.get_class_material(url, firstTime=True)
+            else:
+                self.get_class_material(url, firstTime=False)
             time.sleep(2)
 
 # ------------------- USAGE -------------------
