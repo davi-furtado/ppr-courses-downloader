@@ -1,17 +1,30 @@
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
+
+from bs4 import BeautifulSoup
+
 import time
 import json
 import os
 
 class CourseScraper:
     def __init__(self):
-        self.MAX_WAIT_TIME = 30
+        self.MAX_WAIT_TIME = 10
+        self.MIN_WAIT_TIME = 3
+        self.DEBUG_MODE = True
+
         self.driver = webdriver.Chrome()
         self.cookies_file = "cookies.json"
+
+    def log(self, msg, exception=None):
+        if self.DEBUG_MODE:
+            if exception:
+                print(f'=> {msg} [{exception}]')
+            else:
+                print(f'-> {msg}')
 
     def load_login_data(self, credentials_file='credentials.json'):
         # Load email and password from JSON file
@@ -24,7 +37,7 @@ class CourseScraper:
         # Store cookies to a JSON file
         with open(self.cookies_file, 'w', encoding='utf-8') as file:
             json.dump(self.driver.get_cookies(), file)
-        print("Cookies saved.")
+        self.log("Cookies saved")
 
     def load_cookies(self):
         # Check if cookies exist
@@ -38,7 +51,7 @@ class CourseScraper:
         for cookie in cookies:
             self.driver.add_cookie(cookie)
 
-        print("Cookies loaded.")
+        self.log("Cookies loaded")
         return True
 
     def login(self, login_url):
@@ -52,10 +65,10 @@ class CourseScraper:
             self.driver.get(login_url)
             time.sleep(3)
             if "entrar" not in self.driver.current_url.lower():
-                print("Logged in using cookies.")
+                self.log("Logged in using cookies")
                 return
             else:
-                print("Cookies invalid. Logging in manually.")
+                self.log("Cookies invalid. Logging in manually")
 
         # Manual login
         email_input = WebDriverWait(self.driver, self.MAX_WAIT_TIME).until(
@@ -74,8 +87,92 @@ class CourseScraper:
         self.save_cookies()
         print("Manual login completed.")
 
+    def download_class_audio(self):
+        try:
+            WebDriverWait(self.driver, self.MAX_WAIT_TIME).until(
+                EC.presence_of_element_located((By.PARTIAL_LINK_TEXT, 'Áudio da aula (mp3)'))
+            )
+            audio = self.driver.find_element(By.PARTIAL_LINK_TEXT, 'Áudio da aula (mp3)')
+            audio.click()
+        except Exception as e:
+            self.log('Couldnt find audio', e)
+
+    def download_class_summary(self):
+        try:
+            WebDriverWait(self.driver, self.MAX_WAIT_TIME).until(
+                EC.presence_of_element_located((By.ID, 'print-button'))
+            )
+            print_button = self.driver.find_element(By.ID, 'print-button')
+            print_button.click()
+        except Exception as e:
+            self.log('Couldnt find print button', e)
+
+        try:
+            select_element = WebDriverWait(self.driver, self.MAX_WAIT_TIME).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, 'select.md-select'))
+            )
+            dropdown = Select(select_element)
+            dropdown.select_by_value("Save as PDF/local/")
+        except Exception as e:
+            self.log('Couldnt find Save as PDF option', e)
+
+        try:
+            WebDriverWait(self.driver, self.MAX_WAIT_TIME).until(
+                EC.presence_of_element_located((By.PARTIAL_LINK_TEXT, 'Save'))
+            )
+            print_button = self.driver.find_element(By.ID, 'Save')
+            print_button.click()
+        except Exception as e:
+            self.log('Couldnt find Salvar button', e)
+
+    def get_class_material(self, class_url):
+        self.driver.get(class_url)
+
+        try:
+            review = WebDriverWait(self.driver, self.MIN_WAIT_TIME).until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR, ".course-review__ask-later"))
+            )
+            review.click()
+        except:
+            pass
+
+        # TODO move to class listing
+        try:
+            enable_cookies = WebDriverWait(self.driver, self.MIN_WAIT_TIME).until(
+                EC.element_to_be_clickable((By.ID, "c-p-bn"))
+            )
+            enable_cookies.click()
+        except:
+            pass
+
+        self.download_class_audio()
+        # TODO self.download_class_summary()
+
+    def get_all_class_links(self, course_url):
+        self.driver.get(course_url)
+
+        # wait until lessons load
+        WebDriverWait(self.driver, self.MAX_WAIT_TIME).until(
+            EC.presence_of_all_elements_located((By.ID, "course-classes"))
+        )
+
+        links = self.driver.find_elements(By.CSS_SELECTOR, "a.class")
+        urls = [link.get_attribute("href") for link in links]
+        self.log(f"Found {len(urls)} lessons")
+        return urls
+    
+    def download_course(self, course_url):
+        class_urls = self.get_all_class_links(course_url)
+
+        for index, url in enumerate(class_urls, start=1):
+            self.log(f"Downloading lesson {index}/{len(class_urls)}")
+            self.get_class_material(url)
+            time.sleep(2)
+
 # ------------------- USAGE -------------------
 
 scraper = CourseScraper()
 scraper.login("https://padrepauloricardo.org/entrar")
+#scraper.get_class_material('https://padrepauloricardo.org/aulas/o-que-e-ser-homem')
+scraper.download_course('https://padrepauloricardo.org/cursos/os-sete-sacramentos')
 time.sleep(5)
