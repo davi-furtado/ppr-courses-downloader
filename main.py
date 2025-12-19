@@ -10,10 +10,11 @@ from bs4 import BeautifulSoup
 import time
 import json
 import os
+import re
 
 class CourseScraper:
     def __init__(self):
-        self.MAX_WAIT_TIME = 10
+        self.MAX_WAIT_TIME = 4
         self.MIN_WAIT_TIME = 3
         self.DEBUG_MODE = True
 
@@ -104,45 +105,92 @@ class CourseScraper:
     def download_class_audio(self):
         try:
             WebDriverWait(self.driver, self.MAX_WAIT_TIME).until(
-                EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'Áudio da aula')]"))
+                EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'Áudio da')]"))
             )
-            audio = self.driver.find_element(By.XPATH, "//*[contains(text(), 'Áudio da aula')]")
+            audio = self.driver.find_element(By.XPATH, "//*[contains(text(), 'Áudio da')]")
             audio.click()
         except Exception as e:
             self.log('Couldnt find audio', e)
 
+    def sanitize_filename(self, filename):
+        """Remove caracteres inválidos do nome do arquivo"""
+        filename = re.sub(r'[<>:"/\\|?*]', '', filename)
+        filename = filename.strip()
+        return filename[:200]  # Limita o tamanho do nome
+
     def download_class_summary(self):
         try:
+            # Espera a div lesson-content__text carregar
             WebDriverWait(self.driver, self.MAX_WAIT_TIME).until(
-                EC.presence_of_element_located((By.ID, 'print-button'))
+                EC.presence_of_element_located((By.CLASS_NAME, 'lesson-content__text'))
             )
-            print_button = self.driver.find_element(By.ID, 'print-button')
-            print_button.click()
+            
+            # Pega o HTML da página
+            page_source = self.driver.page_source
+            soup = BeautifulSoup(page_source, 'html.parser')
+            
+            # Encontra a div lesson-content__text
+            lesson_content = soup.find('div', class_='lesson-content__text')
+            
+            if not lesson_content:
+                self.log('Couldnt find lesson-content__text div')
+                return
+            
+            # Extrai o título da aula
+            title_elem = lesson_content.find('h2', class_='lesson-text__title')
+            title = title_elem.get_text(strip=True) if title_elem else 'aula_sem_titulo'
+            
+            # Extrai o tema
+            theme_elem = lesson_content.find('span', class_='lesson-text__theme')
+            theme = theme_elem.get_text(strip=True) if theme_elem else ''
+            
+            # Extrai a descrição
+            description_elem = lesson_content.find('div', class_='lesson-text__description')
+            description = description_elem.get_text(strip=True) if description_elem else ''
+            
+            # Extrai o conteúdo do artigo
+            article = lesson_content.find('article', class_='editor')
+            
+            if not article:
+                self.log('Couldnt find article content')
+                return
+            
+            # Remove scripts e estilos
+            for script in article(['script', 'style']):
+                script.decompose()
+            
+            # Pega todo o texto formatado
+            paragraphs = article.find_all('p')
+            content_text = '\n\n'.join([p.get_text(strip=True) for p in paragraphs])
+            
+            # Monta o texto final
+            full_text = f"{theme}\n\n"
+            full_text += f"{title}\n"
+            full_text += "=" * len(title) + "\n\n"
+            
+            if description:
+                full_text += f"{description}\n\n"
+                full_text += "-" * 80 + "\n\n"
+            
+            full_text += content_text
+            
+            # Cria o nome do arquivo
+            filename = self.sanitize_filename(f"{title}.txt")
+            filepath = os.path.join(self.base_download_dir, filename)
+            
+            # Salva o arquivo
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(full_text)
+            
+            self.log(f'Texto salvo em: {filepath}')
+            
         except Exception as e:
-            self.log('Couldnt find print button', e)
-
-        try:
-            select_element = WebDriverWait(self.driver, self.MAX_WAIT_TIME).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, 'select.md-select'))
-            )
-            dropdown = Select(select_element)
-            dropdown.select_by_value("Save as PDF/local/")
-        except Exception as e:
-            self.log('Couldnt find Save as PDF option', e)
-
-        try:
-            WebDriverWait(self.driver, self.MAX_WAIT_TIME).until(
-                EC.presence_of_element_located((By.PARTIAL_LINK_TEXT, 'Save'))
-            )
-            print_button = self.driver.find_element(By.ID, 'Save')
-            print_button.click()
-        except Exception as e:
-            self.log('Couldnt find Salvar button', e)
+            self.log('Error downloading class summary', e)
 
     def get_class_material(self, class_url, firstTime=False):
         self.driver.get(class_url)
 
-        if not firstTime:
+        if firstTime:
             try:
                 review = WebDriverWait(self.driver, self.MIN_WAIT_TIME).until(
                     EC.element_to_be_clickable((By.CSS_SELECTOR, ".course-review__ask-later"))
@@ -151,19 +199,10 @@ class CourseScraper:
             except:
                 pass
 
-            # TODO move to class listing
-            try:
-                enable_cookies = WebDriverWait(self.driver, self.MIN_WAIT_TIME).until(
-                    EC.element_to_be_clickable((By.ID, "c-p-bn"))
-                )
-                enable_cookies.click()
-            except:
-                pass
+        # self.download_class_audio()
+        self.download_class_summary()
 
-        self.download_class_audio()
-        # TODO self.download_class_summary()
-
-    def get_all_class_links(self, course_url):
+    def get_all_classes_links(self, course_url):
         self.driver.get(course_url)
 
         # wait until lessons load
@@ -176,7 +215,8 @@ class CourseScraper:
         self.log(f"Found {len(urls)} lessons")
         return urls
     
-    def download_course(self, course_url, course_name):
+    def download_course(self, course_url: str):
+        course_name = course_url.split('/')[-1]
         course_dir = os.path.join(self.base_download_dir, course_name)
         os.makedirs(course_dir, exist_ok=True)
 
@@ -191,20 +231,46 @@ class CourseScraper:
             }
         )
 
-        class_urls = self.get_all_class_links(course_url)
+        class_urls = self.get_all_classes_links(course_url)
 
         for index, url in enumerate(class_urls, start=1):
             self.log(f"Downloading lesson {index}/{len(class_urls)}")
             self.get_class_material(url, firstTime=(index == 1))
-            time.sleep(2)
+            time.sleep(1)
+
+    def get_all_courses_links(self, courses_url):
+        self.driver.get(courses_url)
+
+        # wait until lessons load
+        WebDriverWait(self.driver, self.MAX_WAIT_TIME).until(
+            EC.presence_of_all_elements_located((By.CLASS_NAME, "course-card"))
+        )
+
+        links = self.driver.find_elements(By.CLASS_NAME, "course-card")
+        urls = [link.get_attribute("href") for link in links]
+        self.log(f"Found {len(urls)} courses")
+        return urls
+
+    def download_all_courses(self, courses_url):
+        courses_urls = self.get_all_courses_links(courses_url)
+
+        try:
+            enable_cookies = WebDriverWait(self.driver, self.MIN_WAIT_TIME).until(
+                EC.element_to_be_clickable((By.ID, "c-p-bn"))
+            )
+            enable_cookies.click()
+        except:
+            pass
+
+        for index, url in enumerate(courses_urls, start=1):
+            self.log(f"Downloading course {index}/{len(courses_urls)}: {url.split('/')[-1]}")
+            self.download_course(url)
+            time.sleep(1)
 
 # ------------------- USAGE -------------------
 
 scraper = CourseScraper()
 scraper.login("https://padrepauloricardo.org/entrar")
-#scraper.get_class_material('https://padrepauloricardo.org/aulas/o-que-e-ser-homem')
-scraper.download_course(
-    "https://padrepauloricardo.org/cursos/os-sete-sacramentos",
-    course_name="Os-Sete-Sacramentos"
-)
+scraper.get_class_material('https://padrepauloricardo.org/aulas/as-universidades')
+# scraper.download_all_courses('https://padrepauloricardo.org/cursos')
 time.sleep(5)
