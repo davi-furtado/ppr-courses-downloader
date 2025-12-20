@@ -1,6 +1,6 @@
 # Padre Paulo Ricardo Courses Downloader
 
-This project automates the download of **course materials (audio + text summaries)** from the website [padrepauloricardo.org](https://padrepauloricardo.org) using Selenium and BeautifulSoup.
+This project is a Web Scraper that automates the download of **course materials (audio + text summaries)** from the website [padrepauloricardo.org](https://padrepauloricardo.org) using Selenium and BeautifulSoup.
 
 The downloader supports:  
 - ✔ Automatic login using saved cookies  
