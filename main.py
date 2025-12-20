@@ -1,7 +1,6 @@
 from coursescraper import CourseScraper
 from os import path
 from sys import argv
-from time import sleep
 
 def main():
     if not ((len(argv) == 2 and argv[1] == '--allcourses')

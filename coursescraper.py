@@ -160,13 +160,38 @@ class CourseScraper:
         try:
             self.log("Searching for audio button")
             WebDriverWait(self.driver, self.MAX_WAIT_TIME).until(
-                EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'Áudio da')]"))
+                EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'Áudio d')]"))
             )
-            audio_button = self.driver.find_element(By.XPATH, "//*[contains(text(), 'Áudio da')]")
+            audio_button = self.driver.find_element(By.XPATH, "//*[contains(text(), 'Áudio d')]")
             audio_button.click()
             self.log("Audio download started", level="SUCCESS")
         except Exception as e:
             self.log('Could not find audio button', e, level="ERROR")
+
+    def download_class_downloadables(self):
+        """Download files from class"""
+        try:
+            self.log("Searching for download links")
+
+            # Espera os elementos dentro do id 'download-content' estarem presentes
+            WebDriverWait(self.driver, self.MAX_WAIT_TIME).until(
+                EC.presence_of_all_elements_located((By.ID, "download-content"))
+            )
+
+            # Encontra todos os links de download dentro do 'download-content'
+            download_section = self.driver.find_element(By.ID, "download-content")
+            all_download_links = download_section.find_elements(By.TAG_NAME, "a")
+
+            # Filtra apenas os links que contêm '(pdf)' no texto
+            pdf_links = [link for link in all_download_links if "(pdf)" in link.text]
+
+            for pdf in pdf_links:
+                pdf.click()
+                self.log(f"Pdf download started for: {pdf.get_attribute('download')}", level="SUCCESS")
+
+        except Exception as e:
+            self.log(f'Could not find or click on pdf links: {str(e)}', level="ERROR")
+
 
     def sanitize_filename(self, filename):
         """Remove invalid characters from filename"""
@@ -273,6 +298,7 @@ class CourseScraper:
 
         self.download_class_audio()
         self.download_class_summary(class_num, class_name)
+        # self.download_class_downloadables()
 
     def get_all_classes_links(self, course_url):
         """Get all class URLs from a course"""
