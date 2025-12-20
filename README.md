@@ -41,7 +41,7 @@ python main.py --allcourses
 
 ### Download a SINGLE course
 ```bash
-python main.py --course https://padrepauloricardo.org/cursos/course-name-here
+python main.py --course https://padrepauloricardo.org/cursos/course-link-here
 ```
 
 ## Logging
