@@ -24,11 +24,11 @@ pip install selenium beautifulsoup4
 ```
 
 ## Credentials Setup
-Create a `credentials.json` file in the root directory:
+Fill the `credentials.json` with your credentials:
 ```bash
 {
-  "email": "your_email_here",
-  "password": "your_password_here"
+    "email": "your_email_here@gmail.com",
+    "password": "your_password_here"
 }
 ```
 On first run, cookies will be generated and reused automatically.
