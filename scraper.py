@@ -1,4 +1,4 @@
-from coursescraper import CourseScraper
+from scraperclass import CourseScraper
 from os import path
 from sys import argv
 

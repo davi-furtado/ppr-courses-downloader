@@ -114,7 +114,7 @@ class CourseDatabase:
             
             return self.cursor.lastrowid
         except sqlite3.IntegrityError:
-            print(f"⚠ Lesson {lesson_number} already exists for course {course_id}")
+            print(f"Lesson {lesson_number} already exists for course {course_id}")
             return -1
     
     def search_courses(self, keyword: Optional[str] = None) -> List[sqlite3.Row]:
@@ -244,19 +244,19 @@ class CourseImporter:
         root = Path(root_path)
         
         if not root.exists():
-            print(f"❌ Directory not found: {root_path}")
+            print(f"Directory not found: {root_path}")
             return
         
         # Find all course directories
         course_dirs = [d for d in root.iterdir() if d.is_dir()]
         
-        print(f"📚 Found {len(course_dirs)} course directories")
+        print(f"Found {len(course_dirs)} course directories")
         print("=" * 60)
         
         for course_dir in sorted(course_dirs):
             self._import_course(course_dir, verbose)
         
-        print("\n✅ Import completed!")
+        print("\nImport completed!")
     
     def _import_course(self, course_path: Path, verbose: bool):
         """Import a single course directory."""
@@ -264,7 +264,7 @@ class CourseImporter:
         course_slug = self._slugify(course_path.name)
         
         if verbose:
-            print(f"\n📖 Importing: {course_name}")
+            print(f"\nImporting: {course_name}")
         
         course_id = self.db.add_course(course_name, course_slug)
         
@@ -301,7 +301,7 @@ class CourseImporter:
                     with open(lesson_data['txt'], 'r', encoding='utf-8') as f:
                         transcript_content = f.read()
                 except Exception as e:
-                    print(f"  ⚠ Error reading {lesson_data['txt'].name}: {e}")
+                    print(f"  Error reading {lesson_data['txt'].name}: {e}")
             
             txt_path = str(lesson_data.get('txt', ''))
             mp3_path = str(lesson_data.get('mp3', ''))
@@ -392,14 +392,14 @@ def display_lessons(lessons: List[sqlite3.Row], show_course: bool = True, show_m
 def display_statistics(stats: dict):
     """Display database statistics."""
     print("\n" + "=" * 60)
-    print("📊 DATABASE STATISTICS")
+    print("DATABASE STATISTICS")
     print("=" * 60)
     print(f"Total Courses:  {stats['total_courses']}")
     print(f"Total Lessons:  {stats['total_lessons']}")
     print(f"Total Words:    {stats['total_words']:,}")
     
     if stats['top_courses']:
-        print("\n🏆 Top 5 Courses by Lesson Count:")
+        print("\nTop 5 Courses by Lesson Count:")
         for i, course in enumerate(stats['top_courses'], 1):
             print(f"  {i}. {course['name']}: {course['lesson_count']} lessons")
     
@@ -459,12 +459,12 @@ def main():
                 # Show courses ranked by keyword frequency
                 courses = db.search_courses_by_keyword(args.keyword)
                 display_courses(courses, show_matches=True)
-                print(f"\n🔍 Found {len(courses)} courses with '{args.keyword}'")
+                print(f"\nFound {len(courses)} courses with '{args.keyword}'")
             else:
                 # Show lessons with matches
                 lessons = db.search_lessons(args.keyword, args.course)
                 display_lessons(lessons, show_course=True, show_matches=True)
-                print(f"\n🔍 Found {len(lessons)} lessons with '{args.keyword}'")
+                print(f"\nFound {len(lessons)} lessons with '{args.keyword}'")
         
         elif args.command == 'stats':
             stats = db.get_statistics()
