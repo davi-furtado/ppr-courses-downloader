@@ -1,6 +1,6 @@
 # Padre Paulo Ricardo Courses Downloader & Manager
 
-This project is a complete toolset to **download, organize, and search** course materials from [padrepauloricardo.org](https://padrepauloricardo.org).
+This project is a complete toolset to **download, organize, and search** course materials from [padrepauloricardo.org](https://padrepauloricardo.org) with a Web Scraper and a Database Manager.
 
 It consists of two main components:
 1. **Scraper (`scraper.py`):** Automates the download of audio and text summaries using Selenium.
