@@ -71,3 +71,4 @@ cookies.json
 credentials.json
 log.txt
 courses.db
+*.json

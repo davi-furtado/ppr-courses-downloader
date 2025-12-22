@@ -103,7 +103,7 @@ All download operations, timestamps, warnings, and errors are stored in: `downlo
 2. **Manager (`manager.py`)**:
     - **Import**: Recursively reads the folder structure.
     - **Indexing**: Reads `.txt` files and stores content in a SQLite Virtual Table (FTS5) for fast searching.
-    - **Querying**: Allows you to find exactly which minute of which lesson a specific topic was mentioned (based on the text summary).
+    - **Querying**: Allows you to find exactly which lessons a specific topic was mentioned (based on the text summary).
 
 ## ⚠ Disclaimer
 This tool is for **personal use only**.
