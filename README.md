@@ -196,7 +196,7 @@ enabled.
    + **Querying**: Allows you to find exactly which lessons a specific topic
      was mentioned in (based on the text summary).
 
-## ⚠ Disclaimer
+## Disclaimer
 
 This tool is for **personal use only**.
 Only download content you already have rights to access.
