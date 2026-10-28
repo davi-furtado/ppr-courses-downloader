@@ -63,7 +63,8 @@ session expires.
 If the site shows the "Who is watching?" profile screen after login, the first
 profile is selected automatically.
 
-> ⚠ `cookies.json` gives access to your account without a password. Keep it
+> [!WARNING]
+> `cookies.json` gives access to your account without a password. Keep it
 > private and never commit it (it should be listed in `.gitignore`).
 
 ## Usage: 1. Downloading Content
@@ -203,4 +204,5 @@ Respect platform Terms of Service and copyright.
 
 ## LICENSE
 
-This
+This project is under the *MIT* license.
+For more informations, view [this file](LICENSE).
