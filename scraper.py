@@ -4,6 +4,7 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
+from selenium.common.exceptions import TimeoutException
 
 from bs4 import BeautifulSoup
 import re
@@ -28,6 +29,10 @@ COMPLETE_MARKER = ".complete"
 
 # Subfolder of a course where the pdf materials are saved
 MATERIALS_DIR = "materiais"
+# Temporary folder where the pdfs of one class are downloaded before being moved
+STAGING_DIR = ".downloading"
+# Written inside a course folder when the materials of all its classes were processed
+MATERIALS_MARKER = ".materials"
 
 CourseStatus = Literal["new", "partial", "complete"]
 ExistingPolicy = Literal["resume", "replace_all", "ask"]
@@ -68,6 +73,8 @@ class CourseScraper:
 
         self.driver: webdriver.Chrome = webdriver.Chrome(options=chrome_options)
         self.cookies_file: str = "cookies.json"
+        # materials folder -> hashes of the pdfs it already holds
+        self._material_hashes: dict[str, set[str]] = {}
 
         self.log("=" * 40)
         self.log("System started")
@@ -233,66 +240,115 @@ class CourseScraper:
         )
 
     @staticmethod
-    def wait_for_downloads(folder: str, timeout: int = 60) -> bool:
-        """Wait until Chrome has no unfinished (.crdownload) file in the folder."""
+    def wait_for_downloads(folder: str, expected: int = 0, timeout: int = 60) -> bool:
+        """
+        Wait until the folder has at least `expected` finished files and no
+        unfinished (.crdownload) one. Counting files matters because Chrome may
+        not have created the .crdownload yet right after the click.
+        """
         deadline = time.time() + timeout
         while time.time() < deadline:
-            if not any(f.endswith(".crdownload") for f in os.listdir(folder)):
+            names = os.listdir(folder)
+            partial = any(n.endswith(".crdownload") for n in names)
+            if not partial and len(names) >= expected:
                 return True
             time.sleep(0.5)
         return False
 
     @staticmethod
-    def remove_duplicate_files(folder: str) -> int:
-        """Delete files with the same content, keeping the oldest. Returns removed count."""
-        files = sorted(
-            (
-                os.path.join(folder, f)
-                for f in os.listdir(folder)
-                if os.path.isfile(os.path.join(folder, f))
-            ),
-            key=os.path.getmtime,
-        )
-        seen: set[str] = set()
+    def file_sha256(path: str) -> str:
+        digest = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    def known_material_hashes(self, materials_dir: str) -> set[str]:
+        """Hashes of the pdfs already in the folder (computed once per run)."""
+        if materials_dir not in self._material_hashes:
+            self._material_hashes[materials_dir] = {
+                self.file_sha256(os.path.join(materials_dir, name))
+                for name in os.listdir(materials_dir)
+                if os.path.isfile(os.path.join(materials_dir, name))
+            }
+        return self._material_hashes[materials_dir]
+
+    @staticmethod
+    def unique_path(folder: str, name: str) -> str:
+        """folder/name, or folder/name (2) etc. when that name is already taken."""
+        stem, ext = os.path.splitext(name)
+        path = os.path.join(folder, name)
+        counter = 2
+        while os.path.exists(path):
+            path = os.path.join(folder, f"{stem} ({counter}){ext}")
+            counter += 1
+        return path
+
+    def store_materials(self, staging_dir: str, materials_dir: str) -> None:
+        """
+        Move downloaded pdfs into the materials folder. A pdf whose content is
+        already there is dropped; a different pdf with an existing name is kept
+        under a new name instead of overwriting the old one.
+        """
+        known = self.known_material_hashes(materials_dir)
         removed = 0
-        for path in files:
-            with open(path, "rb") as f:
-                digest = hashlib.sha256(f.read()).hexdigest()
-            if digest in seen:
+        for name in sorted(os.listdir(staging_dir)):
+            path = os.path.join(staging_dir, name)
+            if name.endswith(".crdownload") or not os.path.isfile(path):
+                continue
+            digest = self.file_sha256(path)
+            if digest in known:
                 os.remove(path)
                 removed += 1
-            else:
-                seen.add(digest)
-        return removed
+                continue
+            shutil.move(path, self.unique_path(materials_dir, name))
+            known.add(digest)
+        if removed:
+            self.log(f"Skipped {removed} pdf(s) already downloaded")
 
     def download_class_downloadables(self) -> None:
         """
         Download the PDF materials of a class into <course>/materiais.
 
         Materials are offered per class and the same PDF is often attached to
-        several classes, so duplicates (same content) are removed afterwards.
+        several classes, so files with content already present are skipped.
+        Each class downloads into a temporary folder first so that same-named
+        files never overwrite each other.
         """
+        course_dir = self.current_download_dir
+        staging_dir = os.path.join(course_dir, STAGING_DIR)
         try:
             self.log("Searching for download links")
 
             # A class without materials has no 'download-content' list at all
-            sections = self.driver.find_elements(By.ID, "download-content")
-            if not sections:
+            try:
+                section = WebDriverWait(self.driver, self.MIN_WAIT_TIME).until(
+                    EC.presence_of_element_located((By.ID, "download-content"))
+                )
+            except TimeoutException:
                 self.log("No downloadable materials in this class")
                 return
 
             pdf_links = [
                 link
-                for link in sections[0].find_elements(By.TAG_NAME, "a")
+                for link in section.find_elements(By.TAG_NAME, "a")
                 if "(pdf)" in (link.get_attribute("textContent") or "")
             ]
             if not pdf_links:
                 self.log("No pdf materials in this class")
                 return
+            expected = len({link.get_attribute("href") for link in pdf_links})
 
-            materials_dir = os.path.join(self.current_download_dir, MATERIALS_DIR)
+            # The audio download (started earlier) must finish first: Chrome
+            # could otherwise save it in the temporary folder
+            self.wait_for_downloads(course_dir, timeout=120)
+
+            materials_dir = os.path.join(course_dir, MATERIALS_DIR)
             os.makedirs(materials_dir, exist_ok=True)
-            self.set_download_dir(materials_dir)
+            shutil.rmtree(staging_dir, ignore_errors=True)
+            os.makedirs(staging_dir)
+
+            self.set_download_dir(staging_dir)
             try:
                 for pdf in pdf_links:
                     title = (pdf.get_attribute("textContent") or "").strip()
@@ -301,17 +357,17 @@ class CourseScraper:
                     self.log(f"Pdf download started: {title}", level="SUCCESS")
                     time.sleep(0.5)
 
-                if not self.wait_for_downloads(materials_dir):
+                if not self.wait_for_downloads(staging_dir, expected):
                     self.log("Pdf downloads did not finish in time", level="WARNING")
             finally:
-                self.set_download_dir(self.current_download_dir)
+                self.set_download_dir(course_dir)
 
-            removed = self.remove_duplicate_files(materials_dir)
-            if removed:
-                self.log(f"Removed {removed} duplicated pdf(s)")
+            self.store_materials(staging_dir, materials_dir)
 
         except Exception as e:
             self.log("Could not download pdf materials", e, level="ERROR")
+        finally:
+            shutil.rmtree(staging_dir, ignore_errors=True)
 
     def sanitize_filename(self, filename: str) -> str:
         """Remove invalid characters from filename"""
@@ -329,7 +385,8 @@ class CourseScraper:
         filename = self.sanitize_filename(f"{class_name}.txt")
         if not filename[0].isdigit():
             filename = "00. " + filename
-        match = re.match(r"^(\d+)\.\s*(.*)$", filename)
+        # Needs whitespace after the dot, so "1.5 Foo" is not split
+        match = re.match(r"^(\d+)\.\s+(.*)$", filename)
         if match:
             number, title = match.groups()
             return f"{number}. {title.replace(' ', '_')}"
@@ -337,7 +394,13 @@ class CourseScraper:
 
     def legacy_class_text_filename(self, class_name: str) -> str:
         """Name used before the space after the number was introduced."""
-        return self.class_text_filename(class_name).replace(". ", ".", 1)
+        filename = self.sanitize_filename(f"{class_name}.txt")
+        filename = (
+            ("00." + filename)
+            if not filename[0].isdigit()
+            else filename.replace(". ", ".")
+        )
+        return filename.replace(" ", "_")
 
     def download_class_summary(self, class_num: int, class_name: str) -> None:
         """Extract and save class text content to .txt file"""
@@ -567,6 +630,15 @@ class CourseScraper:
         if os.path.exists(marker_path):
             os.remove(marker_path)
 
+        # Same for the materials. Remember if a previous run had finished them:
+        # if not (older version, interrupted run) the classes that already have
+        # their text still need a pass to fetch their pdfs.
+        materials_marker = os.path.join(course_dir, MATERIALS_MARKER)
+        materials_done = os.path.exists(materials_marker)
+        if materials_done:
+            os.remove(materials_marker)
+        self._material_hashes.pop(os.path.join(course_dir, MATERIALS_DIR), None)
+
         # Update current download directory for this course
         self.current_download_dir = course_dir
 
@@ -579,11 +651,12 @@ class CourseScraper:
         classes_info = self.get_all_classes_links(course_url)
 
         # (position in the course, class info) of the classes still to download
-        pending = list(enumerate(classes_info, start=1))
+        all_classes = list(enumerate(classes_info, start=1))
+        pending = all_classes
         if resume:
             pending = [
                 (index, info)
-                for index, info in pending
+                for index, info in all_classes
                 if not any(
                     os.path.exists(os.path.join(course_dir, name))
                     for name in (
@@ -602,9 +675,20 @@ class CourseScraper:
             self.get_class_material(class_info, index, first_time=(position == 1))
             time.sleep(1)
 
+        if resume and not materials_done:
+            pending_indexes = {index for index, _ in pending}
+            for index, class_info in all_classes:
+                if index in pending_indexes:
+                    continue  # already got its materials above
+                self.log(f"Fetching materials of class {index}/{len(classes_info)}")
+                self.driver.get(class_info[1])
+                self.download_class_downloadables()
+                time.sleep(1)
+
         # Only reached if the loop was not interrupted by an error
-        with open(marker_path, "w", encoding="utf-8"):
-            pass
+        for path in (marker_path, materials_marker):
+            with open(path, "w", encoding="utf-8"):
+                pass
 
         self.log(f"Course download completed: {course_name}", level="SUCCESS")
 

@@ -109,6 +109,11 @@ created at the end of the download. Folders without it (an interrupted
 download, or courses downloaded with an older version) are treated as
 *incomplete*.
 
+The PDF materials have their own `.materials` marker. When finishing a course
+that has no such marker (downloaded by an older version, or interrupted), the
+program also revisits the classes whose text already exists, only to fetch
+their PDFs.
+
 When the download ends, the browser stays open on the courses page.
 
 ---
