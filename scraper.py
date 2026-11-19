@@ -10,6 +10,7 @@ import re
 from datetime import datetime
 
 import time
+import hashlib
 import json
 import os
 import shutil
@@ -24,6 +25,9 @@ PROFILE_URL_PART = "quem-esta-assistindo"
 
 # Written inside a course folder when all of its classes were processed
 COMPLETE_MARKER = ".complete"
+
+# Subfolder of a course where the pdf materials are saved
+MATERIALS_DIR = "materiais"
 
 CourseStatus = Literal["new", "partial", "complete"]
 ExistingPolicy = Literal["resume", "replace_all", "ask"]
@@ -221,32 +225,93 @@ class CourseScraper:
         except Exception as e:
             self.log("Could not find audio button", e, level="ERROR")
 
+    def set_download_dir(self, path: str) -> None:
+        """Change the folder where Chrome saves new downloads."""
+        self.driver.execute_cdp_cmd(
+            "Page.setDownloadBehavior",
+            {"behavior": "allow", "downloadPath": path},
+        )
+
+    @staticmethod
+    def wait_for_downloads(folder: str, timeout: int = 60) -> bool:
+        """Wait until Chrome has no unfinished (.crdownload) file in the folder."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if not any(f.endswith(".crdownload") for f in os.listdir(folder)):
+                return True
+            time.sleep(0.5)
+        return False
+
+    @staticmethod
+    def remove_duplicate_files(folder: str) -> int:
+        """Delete files with the same content, keeping the oldest. Returns removed count."""
+        files = sorted(
+            (
+                os.path.join(folder, f)
+                for f in os.listdir(folder)
+                if os.path.isfile(os.path.join(folder, f))
+            ),
+            key=os.path.getmtime,
+        )
+        seen: set[str] = set()
+        removed = 0
+        for path in files:
+            with open(path, "rb") as f:
+                digest = hashlib.sha256(f.read()).hexdigest()
+            if digest in seen:
+                os.remove(path)
+                removed += 1
+            else:
+                seen.add(digest)
+        return removed
+
     def download_class_downloadables(self) -> None:
-        """Download files from class"""
+        """
+        Download the PDF materials of a class into <course>/materiais.
+
+        Materials are offered per class and the same PDF is often attached to
+        several classes, so duplicates (same content) are removed afterwards.
+        """
         try:
             self.log("Searching for download links")
 
-            # Espera os elementos dentro do id 'download-content' estarem presentes
-            WebDriverWait(self.driver, self.MAX_WAIT_TIME).until(
-                EC.presence_of_all_elements_located((By.ID, "download-content"))
-            )
+            # A class without materials has no 'download-content' list at all
+            sections = self.driver.find_elements(By.ID, "download-content")
+            if not sections:
+                self.log("No downloadable materials in this class")
+                return
 
-            # Encontra todos os links de download dentro do 'download-content'
-            download_section = self.driver.find_element(By.ID, "download-content")
-            all_download_links = download_section.find_elements(By.TAG_NAME, "a")
+            pdf_links = [
+                link
+                for link in sections[0].find_elements(By.TAG_NAME, "a")
+                if "(pdf)" in (link.get_attribute("textContent") or "")
+            ]
+            if not pdf_links:
+                self.log("No pdf materials in this class")
+                return
 
-            # Filtra apenas os links que contêm '(pdf)' no texto
-            pdf_links = [link for link in all_download_links if "(pdf)" in link.text]
+            materials_dir = os.path.join(self.current_download_dir, MATERIALS_DIR)
+            os.makedirs(materials_dir, exist_ok=True)
+            self.set_download_dir(materials_dir)
+            try:
+                for pdf in pdf_links:
+                    title = (pdf.get_attribute("textContent") or "").strip()
+                    # JS click: the link may be outside the visible area
+                    self.driver.execute_script("arguments[0].click();", pdf)
+                    self.log(f"Pdf download started: {title}", level="SUCCESS")
+                    time.sleep(0.5)
 
-            for pdf in pdf_links:
-                pdf.click()
-                self.log(
-                    f"Pdf download started for: {pdf.get_attribute('download')}",
-                    level="SUCCESS",
-                )
+                if not self.wait_for_downloads(materials_dir):
+                    self.log("Pdf downloads did not finish in time", level="WARNING")
+            finally:
+                self.set_download_dir(self.current_download_dir)
+
+            removed = self.remove_duplicate_files(materials_dir)
+            if removed:
+                self.log(f"Removed {removed} duplicated pdf(s)")
 
         except Exception as e:
-            self.log(f"Could not find or click on pdf links: {str(e)}", level="ERROR")
+            self.log("Could not download pdf materials", e, level="ERROR")
 
     def sanitize_filename(self, filename: str) -> str:
         """Remove invalid characters from filename"""
@@ -255,14 +320,24 @@ class CourseScraper:
         return filename[:200]  # Limit filename length
 
     def class_text_filename(self, class_name: str) -> str:
-        """Name of the .txt file saved for a class."""
+        """
+        Name of the .txt file saved for a class.
+
+        Keeps one space after the class number ("34. O_valor_da_sinceridade.txt");
+        the remaining spaces become underscores.
+        """
         filename = self.sanitize_filename(f"{class_name}.txt")
-        filename = (
-            ("00." + filename)
-            if not filename[0].isdigit()
-            else filename.replace(". ", ".")
-        )
+        if not filename[0].isdigit():
+            filename = "00. " + filename
+        match = re.match(r"^(\d+)\.\s*(.*)$", filename)
+        if match:
+            number, title = match.groups()
+            return f"{number}. {title.replace(' ', '_')}"
         return filename.replace(" ", "_")
+
+    def legacy_class_text_filename(self, class_name: str) -> str:
+        """Name used before the space after the number was introduced."""
+        return self.class_text_filename(class_name).replace(". ", ".", 1)
 
     def download_class_summary(self, class_num: int, class_name: str) -> None:
         """Extract and save class text content to .txt file"""
@@ -378,7 +453,7 @@ class CourseScraper:
 
         self.download_class_audio()
         self.download_class_summary(class_num, class_name)
-        # self.download_class_downloadables()
+        self.download_class_downloadables()
 
     def get_all_classes_links(self, course_url: str) -> list[tuple[str, str]]:
         """Get all class URLs from a course"""
@@ -499,10 +574,7 @@ class CourseScraper:
         self.log(f"Destination directory: {course_dir}")
 
         # Change Chrome download folder at runtime
-        self.driver.execute_cdp_cmd(
-            "Page.setDownloadBehavior",
-            {"behavior": "allow", "downloadPath": course_dir},
-        )
+        self.set_download_dir(course_dir)
 
         classes_info = self.get_all_classes_links(course_url)
 
@@ -512,8 +584,12 @@ class CourseScraper:
             pending = [
                 (index, info)
                 for index, info in pending
-                if not os.path.exists(
-                    os.path.join(course_dir, self.class_text_filename(info[0]))
+                if not any(
+                    os.path.exists(os.path.join(course_dir, name))
+                    for name in (
+                        self.class_text_filename(info[0]),
+                        self.legacy_class_text_filename(info[0]),
+                    )
                 )
             ]
             self.log(

@@ -23,6 +23,9 @@ It consists of the following components:
   + *All platform courses*
 - ✔ Extract and format lesson text into `.txt` files
 - ✔ Download class audio files
+- ✔ Download the PDF study materials offered in some classes (saved in
+  `materiais/` inside each course folder; identical PDFs attached to several
+  classes are kept only once)
 - ✔ Detects courses that were already downloaded and asks before replacing them
 - ✔ Leaves the browser on the courses page when it finishes
 - ✔ Local SQLite Database creation
@@ -186,7 +189,7 @@ enabled.
    + Iterates through lessons, downloading `.mp3` files and extracting text to
      `.txt` files.
    + Saves files in one folder per course, named after the course URL (e.g.,
-     `downloads/course-link-here/01.Lesson_Title.txt`).
+     `downloads/course-link-here/01. Lesson_Title.txt`).
    + Creates a `.complete` file in the course folder when the course finishes.
 
 2. **Database Manager (`database.py`)**:
