@@ -284,11 +284,18 @@ class CourseScraper:
             counter += 1
         return path
 
-    def store_materials(self, staging_dir: str, materials_dir: str) -> None:
+    def class_number_prefix(self, class_name: str) -> str:
+        """Class number as written in the class text file name ("34.")."""
+        return self.class_text_filename(class_name).split(" ", 1)[0]
+
+    def store_materials(
+        self, staging_dir: str, materials_dir: str, prefix: str = ""
+    ) -> None:
         """
-        Move downloaded pdfs into the materials folder. A pdf whose content is
-        already there is dropped; a different pdf with an existing name is kept
-        under a new name instead of overwriting the old one.
+        Move downloaded pdfs into the materials folder, named "N. <name>" with
+        N the class number. A pdf whose content is already there is dropped; a
+        different pdf with an existing name is kept under a new name instead of
+        overwriting the old one.
         """
         known = self.known_material_hashes(materials_dir)
         removed = 0
@@ -301,12 +308,13 @@ class CourseScraper:
                 os.remove(path)
                 removed += 1
                 continue
-            shutil.move(path, self.unique_path(materials_dir, name))
+            final_name = f"{prefix} {name}" if prefix else name
+            shutil.move(path, self.unique_path(materials_dir, final_name))
             known.add(digest)
         if removed:
             self.log(f"Skipped {removed} pdf(s) already downloaded")
 
-    def download_class_downloadables(self) -> None:
+    def download_class_downloadables(self, class_name: str = "") -> None:
         """
         Download the PDF materials of a class into <course>/materiais.
 
@@ -362,7 +370,8 @@ class CourseScraper:
             finally:
                 self.set_download_dir(course_dir)
 
-            self.store_materials(staging_dir, materials_dir)
+            prefix = self.class_number_prefix(class_name) if class_name else ""
+            self.store_materials(staging_dir, materials_dir, prefix)
 
         except Exception as e:
             self.log("Could not download pdf materials", e, level="ERROR")
@@ -516,7 +525,7 @@ class CourseScraper:
 
         self.download_class_audio()
         self.download_class_summary(class_num, class_name)
-        self.download_class_downloadables()
+        self.download_class_downloadables(class_name)
 
     def get_all_classes_links(self, course_url: str) -> list[tuple[str, str]]:
         """Get all class URLs from a course"""
@@ -682,7 +691,7 @@ class CourseScraper:
                     continue  # already got its materials above
                 self.log(f"Fetching materials of class {index}/{len(classes_info)}")
                 self.driver.get(class_info[1])
-                self.download_class_downloadables()
+                self.download_class_downloadables(class_info[0])
                 time.sleep(1)
 
         # Only reached if the loop was not interrupted by an error

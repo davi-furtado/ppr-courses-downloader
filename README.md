@@ -24,7 +24,8 @@ It consists of the following components:
 - ✔ Extract and format lesson text into `.txt` files
 - ✔ Download class audio files
 - ✔ Download the PDF study materials offered in some classes (saved in
-  `materiais/` inside each course folder; identical PDFs attached to several
+  `materiais/` inside each course folder, named "N. name.pdf" with N the
+  class number; identical PDFs attached to several
   classes are kept only once)
 - ✔ Detects courses that were already downloaded and asks before replacing them
 - ✔ Leaves the browser on the courses page when it finishes
